@@ -115,22 +115,25 @@ async def test_user_repository_create_and_get(user_id: int, is_verified: bool):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("invalid_user_id", [-1, 0, -999])
-async def test_user_repository_create_invalid_user_id(invalid_user_id):
-    # user_id < 0 некорректны
-
+@pytest.mark.parametrize(
+    "invalid_user_id, expected_exception, expected_message",
+    [
+        # некорректные целые числа
+        (-1, ValueError, "user_id must be a positive integer"),
+        (0, ValueError, "user_id must be a positive integer"),
+        (-999, ValueError, "user_id must be a positive integer"),
+        # некорректные типы
+        ("", TypeError, "user_id must be an integer"),
+        ("abc", TypeError, "user_id must be an integer"),
+        (None, TypeError, "user_id must be an integer"),
+        (1.23, TypeError, "user_id must be an integer"),
+    ],
+)
+async def test_user_repository_create_invalid_user_id(
+    invalid_user_id, expected_exception, expected_message
+):
     repo = UserRepository()
-    with pytest.raises(ValueError, match="user_id must be a positive integer"):
-        await repo.create_user(user_id=invalid_user_id, is_verified=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("invalid_user_id", ["", "abc", None, 1.23])
-async def test_user_repository_create_invalid_type_user_id(invalid_user_id):
-    # user_id не является целым числом
-
-    repo = UserRepository()
-    with pytest.raises(TypeError, match="user_id must be an integer"):
+    with pytest.raises(expected_exception, match=expected_message):
         await repo.create_user(user_id=invalid_user_id, is_verified=True)
 
 
@@ -195,17 +198,30 @@ async def test_ad_repository_create_and_get(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("invalid_item_id", [-1, 0, -999])
-async def test_create_ad_with_incorrect_item_id(invalid_item_id):
-    # попытка создать объявление с некорректным item_id
-
+@pytest.mark.parametrize(
+    "invalid_item_id, expected_exception, expected_message",
+    [
+        # некорректные целые числа
+        (-1, ValueError, "item_id must be a positive integer"),
+        (0, ValueError, "item_id must be a positive integer"),
+        (-999, ValueError, "item_id must be a positive integer"),
+        # некорректные типы
+        ("", TypeError, "item_id must be an integer"),
+        ("abc", TypeError, "item_id must be an integer"),
+        (None, TypeError, "item_id must be an integer"),
+        (1.23, TypeError, "item_id must be an integer"),
+    ],
+)
+async def test_create_ad_with_invalid_item_id(
+    invalid_item_id, expected_exception, expected_message
+):
     user_repo = UserRepository()
     ad_repo = AdRepository()
 
     seller_id = 12345
     await user_repo.create_user(seller_id, is_verified=True)
 
-    with pytest.raises(ValueError, match="item_id must be a positive integer"):
+    with pytest.raises(expected_exception, match=expected_message):
         await ad_repo.create_ad(
             seller_id=seller_id,
             item_id=invalid_item_id,

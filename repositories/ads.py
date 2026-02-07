@@ -13,6 +13,8 @@ class AdRepository:
         images_qty: int,
     ) -> Dict[str, Any]:
         # валидация item_id, должно быть положительным целым числом
+        if not isinstance(item_id, int):
+            raise TypeError("item_id must be an integer")
         if item_id <= 0:
             raise ValueError("item_id must be a positive integer")
 
