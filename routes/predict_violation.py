@@ -57,12 +57,6 @@ async def violation_predictor_naive(data: Advertisement):
 async def simple_predict(request: Request, item_id: int) -> dict:
 
     # валидация item_id, должно быть положительным целым числом
-    if item_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="item_id is required",
-        )
-
     if item_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
