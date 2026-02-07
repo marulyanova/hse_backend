@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 import pytest
+from unittest.mock import patch
 
 from main import app
 
@@ -110,3 +111,49 @@ def test_params_validation(client, invalid_payloads):
     for payload in invalid_payloads:
         response = client.post("/predict", json=payload)
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_predict_503_model_not_loaded(client):
+    # удаление модели
+    original_model = app.state.models.pop("violation_model", None)
+
+    try:
+        response = client.post(
+            "/predict",
+            json={
+                "seller_id": 123,
+                "is_verified_seller": False,
+                "item_id": 456,
+                "name": "test",
+                "description": "test desc",
+                "category": 1,
+                "images_qty": 0,
+            },
+        )
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert response.json()["detail"] == "ML model is not loaded"
+    finally:
+        # восстановление модели
+        if original_model is not None:
+            app.state.models["violation_model"] = original_model
+
+
+def test_predict_500_prediction_failure(client):
+    valid_data = {
+        "seller_id": 123,
+        "is_verified_seller": False,
+        "item_id": 456,
+        "name": "test",
+        "description": "test desc",
+        "category": 1,
+        "images_qty": 0,
+    }
+
+    # замена функции predict_violation, чтобы было исключение
+    with patch(
+        "routes.predict_violation.predict_violation",
+        side_effect=RuntimeError("Mocked prediction error"),
+    ):
+        response = client.post("/predict", json=valid_data)
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert "Prediction failed with error" in response.json()["detail"]
