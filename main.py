@@ -3,13 +3,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import os
 import logging
 
 from ml_models.model import train_model, save_model, load_model
 from routes.predict_violation import router as predict_violation_router
+from clients.kafka import KafkaProducer
 
 logging.basicConfig(level=logging.INFO)
 
@@ -35,7 +36,13 @@ async def lifespan(app: FastAPI):
     if "violation_model" not in app.state.models:
         raise RuntimeError("Failed to load or train the violation model")
 
+    kafka_producer = KafkaProducer(bootstrap_servers="localhost:9092")
+    await kafka_producer.start()
+    app.state.kafka_producer = kafka_producer
+
     yield
+
+    await kafka_producer.stop()
 
 
 app = FastAPI(lifespan=lifespan)

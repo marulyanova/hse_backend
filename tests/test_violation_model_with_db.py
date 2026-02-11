@@ -12,7 +12,8 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 from main import app
-from models.advertisement import Advertisement
+from repositories.moderation import ModerationRepository
+from workers.moderation_worker import ModerationWorker
 from repositories.users import UserRepository
 from repositories.ads import AdRepository
 
@@ -364,3 +365,288 @@ async def test_simple_predict_500_prediction_failure(client):
         response = client.get(f"/predict/simple_predict/{item_id}")
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         assert "Prediction failed" in response.json()["detail"]
+
+
+# Тесты ручки /async_predict
+@pytest.mark.asyncio
+async def test_async_predict_creates_moderation_task(client):
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+
+    seller_id = 100
+    item_id = 1000
+    await user_repo.create_user(seller_id, is_verified=False)
+    await ad_repo.create_ad(
+        seller_id=seller_id,
+        item_id=item_id,
+        name="Test async ad",
+        description="Test description",
+        category=1,
+        images_qty=0,
+    )
+
+    response = client.post("/predict/async_predict", json={"item_id": item_id})
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "task_id" in data
+    assert data["status"] == "pending"
+    assert data["message"] == "Moderation request accepted"
+
+    mod_repo = ModerationRepository()
+    record = await mod_repo.get_by_id(data["task_id"])
+    assert record["item_id"] == item_id
+    assert record["status"] == "pending"
+    assert record["is_violation"] is None
+
+
+def test_async_predict_invalid_item_id(client):
+    response = client.post("/predict/async_predict", json={"item_id": -1})
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "positive integer" in response.json()["detail"]
+
+
+def test_async_predict_ad_not_found(client):
+    # объявление не создано
+    response = client.post("/predict/async_predict", json={"item_id": 999999})
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "Ad not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_moderation_result_pending(client):
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+    await user_repo.create_user(200, is_verified=False)
+    await ad_repo.create_ad(
+        seller_id=200,
+        item_id=123,
+        name="Pending ad",
+        description="...",
+        category=1,
+        images_qty=0,
+    )
+
+    mod_repo = ModerationRepository()
+    record = await mod_repo.create_pending(item_id=123)
+
+    response = client.get(f"/predict/moderation_result/{record['id']}")
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["task_id"] == record["id"]
+    assert data["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_get_moderation_result_completed(client):
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+    await user_repo.create_user(300, is_verified=False)
+    await ad_repo.create_ad(
+        seller_id=300,
+        item_id=456,
+        name="Completed ad",
+        description="...",
+        category=1,
+        images_qty=0,
+    )
+
+    # вставляем запись в бд
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO moderation_results 
+            (item_id, status, is_violation, probability, processed_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            RETURNING id
+        """,
+            456,
+            "completed",
+            True,
+            0.87,
+        )
+        task_id = row["id"]
+    finally:
+        await conn.close()
+
+    response = client.get(f"/predict/moderation_result/{task_id}")
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["is_violation"] is True
+    assert data["probability"] == 0.87
+
+
+def test_get_moderation_result_not_found(client):
+    response = client.get("/predict/moderation_result/999999")
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "Task with id = 999999 not found" in response.json()["detail"]
+
+
+# Тесты kafka и воркера
+@pytest.mark.asyncio
+@patch("workers.moderation_worker.KafkaProducer")
+@patch("workers.moderation_worker.get_pg_connection")
+async def test_worker_processes_message_success(
+    mock_pg_conn, mock_kafka_producer_class
+):
+    mock_conn = AsyncMock()
+    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
+
+    mock_conn.fetchrow.side_effect = [
+        {
+            "item_id": 101,
+            "seller_id": 202,
+            "is_verified_seller": False,
+            "name": "Test",
+            "description": "Desc",
+            "category": 1,
+            "images_qty": 0,
+        },
+        {"id": 50},
+    ]
+
+    with patch("workers.moderation_worker.load_model") as mock_load_model, patch(
+        "workers.moderation_worker.predict_violation"
+    ) as mock_predict:
+
+        mock_load_model.return_value = "mocked_model"
+        mock_predict.return_value = {"is_violation": True, "probability": 0.92}
+
+        worker = ModerationWorker(Path("../ml_models/model.pkl"))
+        success = await worker.process_message_with_retry({"item_id": 101})
+
+        assert success is True
+
+        update_call = mock_conn.execute.call_args_list[-1]
+        assert "UPDATE moderation_results" in update_call[0][0]
+        assert update_call[0][1] == True
+        assert update_call[0][2] == 0.92
+        assert update_call[0][3] == 50
+
+
+@pytest.mark.asyncio
+@patch("workers.moderation_worker.KafkaProducer")
+@patch("workers.moderation_worker.get_pg_connection")
+async def test_worker_sends_to_dlq_on_error(mock_pg_conn, mock_kafka_producer_class):
+    mock_conn = AsyncMock()
+    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
+    mock_conn.fetchrow.return_value = None
+
+    mock_kafka_instance = AsyncMock()
+    mock_kafka_producer_class.return_value = mock_kafka_instance
+
+    worker = ModerationWorker(Path("../ml_models/model.pkl"))
+
+    success = await worker.process_message_with_retry({"item_id": 999})
+    assert success is False
+
+    update_call = mock_conn.execute.call_args_list[-1]
+    assert "UPDATE moderation_results" in update_call[0][0]
+    assert "status = 'failed'" in update_call[0][0]
+    assert "error_message" in update_call[0][0]
+    assert update_call[0][1] == "Ad with item_id = 999 not found"
+    assert update_call[0][2] == 999
+
+    # DLQ
+    mock_kafka_instance.send_json.assert_called_once()
+    args, _ = mock_kafka_instance.send_json.call_args
+    topic, message = args
+    assert topic == "moderation_dlq"
+    assert message["original_message"]["item_id"] == 999
+    assert "not found" in message["error"]
+    assert message["retry_count"] == 3
+
+
+# Тест на retry в kafka
+@pytest.mark.asyncio
+@patch(
+    "workers.moderation_worker.predict_violation",
+    side_effect=ConnectionError("ML service is temporarily unavailable"),
+)
+@patch("workers.moderation_worker.asyncio.sleep", new_callable=AsyncMock)
+@patch("workers.moderation_worker.get_pg_connection")
+async def test_worker_retries_on_temporary_error(
+    mock_pg_conn, mock_sleep, mock_predict
+):
+    mock_conn = AsyncMock()
+    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
+
+    ad_row_data = {
+        "item_id": 123,
+        "seller_id": 456,
+        "is_verified_seller": False,
+        "name": "Test Ad",
+        "description": "Test description",
+        "category": 1,
+        "images_qty": 0,
+    }
+
+    mock_conn.fetchrow.side_effect = [
+        ad_row_data,
+        {"id": 99},
+        ad_row_data,
+        {"id": 99},
+        ad_row_data,
+        {"id": 99},
+    ]
+
+    worker = ModerationWorker(Path(__file__).parent.parent / "ml_models" / "model.pkl")
+    await worker.start()
+
+    try:
+        success = await worker.process_message_with_retry({"item_id": 123})
+
+        assert success is False  # после трех попыток неуспех
+        assert mock_predict.call_count == 3
+        assert mock_sleep.call_count == 2
+
+        last_execute_call = mock_conn.execute.call_args_list[-1]
+        sql = last_execute_call[0][0]
+        assert "UPDATE moderation_results" in sql
+        assert "status = 'failed'" in sql
+        assert "ML service is temporarily unavailable" in last_execute_call[0][1]
+
+    finally:
+        await worker.stop()
+
+
+# Отправка нескольких запросов с одним item_id
+@pytest.mark.asyncio
+async def test_multiple_async_predict_same_item(client):
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+
+    seller_id = 777
+    item_id = 8888
+    await user_repo.create_user(seller_id, is_verified=False)
+    await ad_repo.create_ad(
+        seller_id=seller_id,
+        item_id=item_id,
+        name="Duplicate test ad",
+        description="For idempotency check",
+        category=2,
+        images_qty=1,
+    )
+
+    resp1 = client.post("/predict/async_predict", json={"item_id": item_id})
+    resp2 = client.post("/predict/async_predict", json={"item_id": item_id})
+
+    assert resp1.status_code == HTTPStatus.OK
+    assert resp2.status_code == HTTPStatus.OK
+
+    data1 = resp1.json()
+    data2 = resp2.json()
+
+    assert data1["status"] == "pending"
+    assert data2["status"] == "pending"
+    assert data1["task_id"] != data2["task_id"]
+
+    mod_repo = ModerationRepository()
+    record1 = await mod_repo.get_by_id(data1["task_id"])
+    record2 = await mod_repo.get_by_id(data2["task_id"])
+
+    assert record1["item_id"] == item_id
+    assert record2["item_id"] == item_id
+    assert record1["id"] != record2["id"]
