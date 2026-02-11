@@ -9,3 +9,20 @@ class Advertisement(BaseModel):
     description: str
     category: int
     images_qty: int
+
+
+class AsyncPredictRequest(BaseModel):
+    item_id: int
+
+
+class AsyncPredictResponse(BaseModel):
+    task_id: int
+    status: str
+    message: str
+
+
+class ModerationResultResponse(BaseModel):
+    task_id: int
+    status: str
+    is_violation: bool | None
+    probability: float | None
