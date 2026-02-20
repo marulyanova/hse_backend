@@ -303,7 +303,6 @@ async def test_simple_predict_cache_invalidation_on_close(client):
     result2 = response2.json()
 
     assert result1 == result2
-    print(f"✓ After 'close', prediction still works: {result2}")
 
 
 # Юнит-тесты для проверки вызовов при кэш-хите и кэш-миссе
