@@ -13,7 +13,7 @@ from ml_models.model import load_model
 from services.predict_violation import predict_violation
 from models.advertisement import Advertisement
 from clients.kafka import KafkaProducer
-
+from repositories.prediction_cache import PredictionCacheStorage
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5
@@ -28,6 +28,7 @@ class ModerationWorker:
     def __init__(self, model_path: Path):
         self.model = load_model(model_path)
         self.kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+        self.cache_storage = PredictionCacheStorage()
 
     async def start(self):
         await self.kafka_producer.start()
@@ -75,6 +76,8 @@ class ModerationWorker:
 
             ad_model = Advertisement(**dict(ad_row))
             result = predict_violation(self.model, ad_model)
+
+            await self.cache_storage.set_prediction_cache(item_id, result)
 
             async with get_pg_connection() as conn:
                 await conn.execute(

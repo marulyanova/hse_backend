@@ -51,3 +51,15 @@ curl http://localhost:8000/predict/moderation_result/2
 
 SELECT * FROM moderation_results WHERE item_id = 23345;
 ```
+
+Запуск только интеграционных тестов
+
+```sh
+pytest -m integration -v
+```
+
+Запуск только юнит-тестов
+
+```sh
+pytest -m "not integration" -v
+```

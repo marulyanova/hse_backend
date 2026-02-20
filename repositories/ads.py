@@ -48,3 +48,21 @@ class AdRepository:
         async with get_pg_connection() as conn:
             row = await conn.fetchrow(query, item_id)
             return dict(row) if row else None
+
+    async def close_ad(self, item_id: int) -> bool:
+
+        # закрываем объявление, устанавливая is_closed = TRUE
+
+        if not isinstance(item_id, int):
+            raise TypeError("item_id must be an integer")
+        if item_id <= 0:
+            raise ValueError("item_id must be a positive integer")
+
+        query = """
+            UPDATE ads SET is_closed = TRUE
+            WHERE item_id = $1
+            RETURNING item_id;
+        """
+        async with get_pg_connection() as conn:
+            row = await conn.fetchrow(query, item_id)
+            return row is not None

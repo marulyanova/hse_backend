@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 
+import warnings
+
+warnings.filterwarnings("ignore")
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
@@ -650,3 +654,142 @@ async def test_multiple_async_predict_same_item(client):
     assert record1["item_id"] == item_id
     assert record2["item_id"] == item_id
     assert record1["id"] != record2["id"]
+
+
+# Тесты на закрытие объявления
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_close_ad_repository_success():
+
+    # корректное обновление флага при закрытии
+
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+
+    seller_id = 450
+    item_id = 4500
+    await user_repo.create_user(seller_id, is_verified=True)
+    await ad_repo.create_ad(
+        seller_id=seller_id,
+        item_id=item_id,
+        name="Ad to close",
+        description="Test ad",
+        category=1,
+        images_qty=2,
+    )
+
+    ad = await ad_repo.get_ad_with_seller(item_id)
+    assert ad is not None
+
+    result = await ad_repo.close_ad(item_id)
+    assert result is True
+
+    ad_after = await ad_repo.get_ad_with_seller(item_id)
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "SELECT is_closed FROM ads WHERE item_id = $1", item_id
+        )
+        assert row is not None
+        assert row["is_closed"] is True
+    finally:
+        await conn.close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_close_ad_not_found():
+
+    # попытка закрыть несуществующее объявление должна вернуть false
+
+    ad_repo = AdRepository()
+
+    result = await ad_repo.close_ad(999999)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_close_ad_invalid_item_id():
+    ad_repo = AdRepository()
+
+    with pytest.raises(ValueError, match="item_id must be a positive integer"):
+        await ad_repo.close_ad(-1)
+
+    with pytest.raises(ValueError, match="item_id must be a positive integer"):
+        await ad_repo.close_ad(0)
+
+    with pytest.raises(TypeError, match="item_id must be an integer"):
+        await ad_repo.close_ad("invalid")
+
+
+def test_close_ad_endpoint_invalid_item_id(client):
+    response = client.delete("/predict/close/-1")
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "positive integer" in response.json()["detail"]
+
+
+def test_close_ad_endpoint_ad_not_found(client):
+    response = client.delete("/predict/close/999999")
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "not found" in response.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_close_ad_endpoint_success(client):
+    user_repo = UserRepository()
+    ad_repo = AdRepository()
+
+    seller_id = 550
+    item_id = 5500
+    await user_repo.create_user(seller_id, is_verified=False)
+    await ad_repo.create_ad(
+        seller_id=seller_id,
+        item_id=item_id,
+        name="Ad to close via endpoint",
+        description="Test description",
+        category=2,
+        images_qty=1,
+    )
+
+    ad_before = await ad_repo.get_ad_with_seller(item_id)
+    assert ad_before is not None
+
+    response = client.delete(f"/predict/close/{item_id}")
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "closed successfully" in data["message"]
+    assert data["item_id"] == item_id
+
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "SELECT is_closed FROM ads WHERE item_id = $1", item_id
+        )
+        assert row is not None
+        assert row["is_closed"] is True
+    finally:
+        await conn.close()
+
+
+def test_close_ad_endpoint_deletes_cache(client):
+
+    # при закрытии объявления должен удаляться кэш предсказания для этого item_id
+
+    item_id = 6600
+
+    with patch("routes.predict_violation.ad_repo") as mock_ad_repo, patch(
+        "routes.predict_violation.cache_storage"
+    ) as mock_cache:
+
+        async def mock_close_ad(*args, **kwargs):
+            return True
+
+        mock_ad_repo.close_ad = mock_close_ad
+        mock_cache.delete_prediction_cache = AsyncMock(return_value=True)
+
+        response = client.delete(f"/predict/close/{item_id}")
+
+        assert response.status_code == HTTPStatus.OK
+        assert "closed successfully" in response.json()["message"]
+
+        mock_cache.delete_prediction_cache.assert_called_once_with(item_id)
