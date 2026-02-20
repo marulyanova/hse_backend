@@ -11,6 +11,7 @@ import logging
 from ml_models.model import train_model, save_model, load_model
 from routes.predict_violation import router as predict_violation_router
 from clients.kafka import KafkaProducer
+from clients.redis import redis_client
 
 logging.basicConfig(level=logging.INFO)
 
@@ -36,6 +37,9 @@ async def lifespan(app: FastAPI):
     if "violation_model" not in app.state.models:
         raise RuntimeError("Failed to load or train the violation model")
 
+    await redis_client.connect()
+    app.state.redis_client = redis_client
+
     kafka_producer = KafkaProducer(bootstrap_servers="localhost:9092")
     await kafka_producer.start()
     app.state.kafka_producer = kafka_producer
@@ -43,6 +47,7 @@ async def lifespan(app: FastAPI):
     yield
 
     await kafka_producer.stop()
+    await redis_client.close()
 
 
 app = FastAPI(lifespan=lifespan)
