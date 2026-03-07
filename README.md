@@ -1,30 +1,37 @@
 # hse_backend
 Репозиторий для ДЗ по курсу ВШЭ "Backend-разработка"
 
-Запуск миграций:
+--------
+
+### Запуск
+
+**Запуск миграций:**
 
 ```sh
 cd db
 bash start_migration.sh
 ```
 
-Запуск Docker
+**Запуск Docker**
 
 ```sh
 docker-compose up -d
 ```
 
-Запуск worker
+**Запуск worker**
 ```sh
 python -m workers.moderation_worker
 ```
 
-Запуск FastAPI приложения
+**Запуск FastAPI приложения**
 ```sh
 uvicorn main:app --port 8000
 ```
 
-Тестовые примеры из демо
+--------
+
+### Тестовые примеры из демо Kafka
+
 ```
 INSERT INTO users (id, is_verified) VALUES (3337, false);
 
@@ -52,7 +59,7 @@ curl http://localhost:8000/predict/moderation_result/2
 SELECT * FROM moderation_results WHERE item_id = 23345;
 ```
 
-Запуск только интеграционных тестов
+### Запуск только интеграционных тестов
 
 ```sh
 pytest -m integration -v
@@ -62,4 +69,39 @@ pytest -m integration -v
 
 ```sh
 pytest -m "not integration" -v
+```
+
+### Тестовые примеры из демо Grafana
+
+```
+-Обычные
+- no_violation:
+curl -X POST http://localhost:8000/predict/ -H "Content-Type: application/json" -d '{"seller_id":1,"item_id":123,"is_verified_seller":true,"images_qty":3,"category":1,"name":"Test Product","description":"xTest description for moderation"}'
+
+-violation:
+curl -X POST http://localhost:8000/predict/ -H "Content-Type: application/json" -d '{"seller_id":999,"item_id":777,"is_verified_seller":false,"images_qty":0,"category":99,"name":"Suspicious Ad","description":"x"}'
+
+curl -X POST http://localhost:8000/predict/ -H "Content-Type: application/json" -d '{"seller_id":101,"item_id":888,"is_verified_seller":false,"images_qty":0,"category":50,"name":"Quick Sale","description":"buy now"}'
+
+- Взаимодействие с БД
+- Создание тестового пользователя
+INSERT INTO users (id, is_verified) VALUES (100, false) ON CONFLICT (id) DO NOTHING;
+
+Создание тестового объявления
+INSERT INTO ads (seller_id, item_id, name, description, category, images_qty, is_closed) VALUES (100, 1000, 'Test async ad', 'Test description', 1, 0, false) ON CONFLICT (item_id) DO NOTHING;
+
+curl -s -X POST http://localhost:8000/predict/async_predict -H "Content-Type: application/json" -d '{"item_id":1000}'
+
+Создание тестового пользователя
+INSERT INTO users (id, is_verified) VALUES (12345, true) ON CONFLICT (id) DO NOTHING;
+
+Создание тестового объявления
+INSERT INTO ads (seller_id, item_id, name, description, category, images_qty, is_closed) VALUES (12345, 123450, 'Test async ad 2', 'Test description 2', 1, 0, false) ON CONFLICT (item_id) DO NOTHING;
+
+curl -s -X POST http://localhost:8000/predict/async_predict -H "Content-Type: application/json" -d '{"item_id": 123450}'
+curl -s http://localhost:8000/predict/moderation_result/1
+
+- Вызов ошибок
+curl -s http://localhost:8000/predict/simple_predict/-1
+curl -s http://localhost:8000/predict/simple_predict/abc
 ```

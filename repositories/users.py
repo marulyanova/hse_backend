@@ -1,11 +1,11 @@
+import time
 from typing import Optional
 from clients.postgres import get_pg_connection
+from metrics import DB_QUERY_DURATION
 
 
 class UserRepository:
     async def create_user(self, user_id: int, is_verified: bool = False) -> dict:
-
-        # валидация user_id, должно быть положительным целым числом
         if not isinstance(user_id, int):
             raise TypeError("user_id must be an integer")
         if user_id <= 0:
@@ -17,15 +17,22 @@ class UserRepository:
             ON CONFLICT (id) DO NOTHING
             RETURNING id, is_verified;
         """
+        start = time.time()
         async with get_pg_connection() as conn:
             row = await conn.fetchrow(query, user_id, is_verified)
-            if row:
-                return dict(row)
-            existing = await self.get_user_by_id(user_id)
-            return existing
+        duration = time.time() - start
+        DB_QUERY_DURATION.labels(query_type="insert", table="users").observe(duration)
+
+        if row:
+            return dict(row)
+        existing = await self.get_user_by_id(user_id)
+        return existing
 
     async def get_user_by_id(self, user_id: int) -> Optional[dict]:
         query = "SELECT id, is_verified FROM users WHERE id = $1;"
+        start = time.time()
         async with get_pg_connection() as conn:
             row = await conn.fetchrow(query, user_id)
-            return dict(row) if row else None
+        duration = time.time() - start
+        DB_QUERY_DURATION.labels(query_type="select", table="users").observe(duration)
+        return dict(row) if row else None
