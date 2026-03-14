@@ -1,5 +1,24 @@
 from prometheus_client import Counter, Histogram
 
+AUTH_REQUESTS_TOTAL = Counter(
+    "auth_requests_total",
+    "Total number of authentication requests",
+    ["status"],
+)
+
+AUTH_REQUEST_DURATION = Histogram(
+    "auth_request_duration_seconds",
+    "Time spent on authentication requests",
+    ["endpoint"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+)
+
+AUTH_FAILURES_TOTAL = Counter(
+    "auth_failures_total",
+    "Number of failed authentication attempts",
+    ["reason"],
+)
+
 REQUEST_COUNT = Counter(
     "http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"]
 )

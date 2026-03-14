@@ -2,3 +2,5 @@ scikit-learn
 numpy
 mlflow
 redis>=5.0.0
+prometheus-client
+pyjwt

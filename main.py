@@ -10,6 +10,7 @@ import logging
 
 from ml_models.model import train_model, save_model, load_model
 from routes.predict_violation import router as predict_violation_router
+from routes.auth import router as auth_router
 from clients.kafka import KafkaProducer
 from clients.redis import redis_client
 
@@ -88,6 +89,7 @@ async def metrics():
 
 
 app.include_router(predict_violation_router, prefix="/predict")
+app.include_router(auth_router, prefix="")
 
 
 @app.get("/")

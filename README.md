@@ -30,6 +30,20 @@ uvicorn main:app --port 8000
 
 --------
 
+### Тесты для ДЗ Безопасность и аутентификация 
+
+```sh
+pytest tests/test_accounts_repo.py && pytest tests/test_auth_service.py && pytest tests/test_auth_routes.py && pytest tests/test_auth_dependency.py
+```
+
+или
+
+```sh
+pytest -m "auth" -v
+```
+
+--------
+
 ### Тестовые примеры из демо Kafka
 
 ```

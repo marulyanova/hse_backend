@@ -11,7 +11,7 @@ async def get_pg_connection() -> AsyncGenerator[None, asyncpg.Connection]:
         password="postgres",
         database="service",
         host="localhost",
-        port=5432,
+        port=5435,  # изменено с 5432 на 5435, т.к. сейчас postgres в docker
     )
 
     yield connection
