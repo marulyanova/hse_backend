@@ -17,6 +17,7 @@ from repositories.ads import AdRepository
 from repositories.moderation import ModerationRepository, ModerationResultNotFoundError
 from repositories.prediction_cache import PredictionCacheStorage
 from clients.kafka import KafkaProducer
+from dependencies.auth import CurrentAccount
 
 router = APIRouter()
 ad_repo = AdRepository()
@@ -26,7 +27,9 @@ kafka_producer = KafkaProducer(bootstrap_servers="localhost:9092")
 
 
 @router.post("/")
-async def violation_predictor(request: Request, data: Advertisement):
+async def violation_predictor(
+    request: Request, data: Advertisement, current_account: CurrentAccount
+):
 
     logging.info(
         f"Request received: seller_id = {data.seller_id}, item_id = {data.item_id}, "
@@ -65,7 +68,9 @@ async def violation_predictor_naive(data: Advertisement):
 
 
 @router.get("/simple_predict/{item_id}")
-async def simple_predict(request: Request, item_id: int) -> dict:
+async def simple_predict(
+    request: Request, item_id: int, current_account: CurrentAccount
+) -> dict:
 
     if item_id <= 0:
         raise HTTPException(
@@ -120,7 +125,9 @@ async def simple_predict(request: Request, item_id: int) -> dict:
 
 
 @router.post("/async_predict", response_model=AsyncPredictResponse)
-async def async_predict(request: Request, data: AsyncPredictRequest):
+async def async_predict(
+    request: Request, data: AsyncPredictRequest, current_account: CurrentAccount
+):
     if data.item_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -160,7 +167,7 @@ async def async_predict(request: Request, data: AsyncPredictRequest):
 
 
 @router.get("/moderation_result/{task_id}", response_model=ModerationResultResponse)
-async def get_moderation_result(task_id: int):
+async def get_moderation_result(task_id: int, current_account: CurrentAccount):
     if task_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -184,7 +191,7 @@ async def get_moderation_result(task_id: int):
 
 
 @router.delete("/close/{item_id}")
-async def close_ad(item_id: int):
+async def close_ad(item_id: int, current_account: CurrentAccount):
 
     # закрытие объявления и удаление данных по нему
 
