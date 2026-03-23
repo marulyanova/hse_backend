@@ -1,14 +1,9 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 import pytest
 from unittest.mock import patch
 
-from main import app
+from hse_backend.main import app
 
 
 @pytest.fixture
@@ -151,7 +146,7 @@ def test_predict_500_prediction_failure(client):
 
     # замена функции predict_violation, чтобы было исключение
     with patch(
-        "routes.predict_violation.predict_violation",
+        "hse_backend.routes.predict_violation.predict_violation",
         side_effect=RuntimeError("Mocked prediction error"),
     ):
         response = client.post("/predict", json=valid_data)

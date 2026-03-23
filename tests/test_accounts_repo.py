@@ -1,14 +1,8 @@
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from clients.postgres import get_pg_connection
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from repositories.accounts import AccountRepository
+from hse_backend.clients.postgres import get_pg_connection
+from hse_backend.repositories.accounts import AccountRepository
 
 import warnings
 

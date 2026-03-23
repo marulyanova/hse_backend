@@ -1,12 +1,33 @@
-import pytest
 import sys
-from pathlib import Path
 import pytest
+from pathlib import Path
 import asyncio
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# when running pytest from projects folder, ensure we can import the hse_backend package
+# conftest is in hse_backend/tests, so parents[2] points to the repository root, where hse_backend folder is present
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from clients.redis import redis_client
+from hse_backend.clients.redis import redis_client
+from hse_backend.clients.postgres import init_pool, close_pool
+
+import pytest_asyncio
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def postgres_pool():
+    await init_pool()
+    yield
+    await close_pool()
+
 
 INVALID_PAYLOADS = [
     # нет images_qty
@@ -40,6 +61,12 @@ def invalid_payloads():
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_redis_connection():
+    """
+    CAUTION: session-scoped autouse fixture.
+    Only use for critical setup like database/service connections.
+    Individual tests should request specific fixtures if they need cleanup.
+    """
+
     async def _connect():
         await redis_client.connect()
 
@@ -57,9 +84,15 @@ def setup_redis_connection():
         pass
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()  # Removed autouse=True to prevent unwanted side effects
 def clean_redis_cache():
-    # очистка кэша перед каждым тестом
+    """
+    Fixture to clean Redis cache. Use explicitly in tests that need it:
+
+    @pytest.mark.asyncio
+    async def test_something(clean_redis_cache):
+        # cache is cleaned before this test
+    """
 
     async def _clean():
         try:

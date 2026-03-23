@@ -3,15 +3,10 @@ import time
 from fastapi import APIRouter, HTTPException, status, Response
 from fastapi.responses import JSONResponse
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from models.account import Account
-from repositories.accounts import AccountRepository
-from services.auth import AuthService
-from metrics import AUTH_REQUESTS_TOTAL, AUTH_REQUEST_DURATION
+from hse_backend.models.account import Account
+from hse_backend.repositories.accounts import AccountRepository
+from hse_backend.services.auth import AuthService
+from hse_backend.metrics import AUTH_REQUESTS_TOTAL, AUTH_REQUEST_DURATION
 
 router = APIRouter()
 account_repo = AccountRepository()

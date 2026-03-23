@@ -1,8 +1,8 @@
 import uuid
 import pytest
 from fastapi.testclient import TestClient
-from main import app
-from repositories.accounts import AccountRepository
+from hse_backend.main import app
+from hse_backend.repositories.accounts import AccountRepository
 
 import warnings
 

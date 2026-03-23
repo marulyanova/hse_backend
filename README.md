@@ -1,6 +1,71 @@
 # hse_backend
 Репозиторий для ДЗ по курсу ВШЭ "Backend-разработка"
 
+### Структура проекта
+
+```
+├── clients
+│   ├── kafka.py
+│   ├── postgres.py
+│   └── redis.py
+├── config
+│   └── redis.conf
+├── data
+│   └── redis
+│       └── dump.rdb
+├── db
+│   ├── migrations
+│   │   └── migrations
+│   │       ├── V001__create_users_and_ads.sql
+│   │       ├── V002__create_moderation_results.sql
+│   │       ├── V003__add_is_closed_to_ads.sql
+│   │       └── V004__account.sql
+│   └── start_migration.sh
+├── dependencies
+│   └── auth.py
+├── docker-compose.yml
+├── main.py
+├── metrics.py
+├── ml_models
+│   ├── model.pkl
+│   └── model.py
+├── models
+│   ├── account.py
+│   └── advertisement.py
+├── prometheus.yml
+├── pytest.uni
+├── README.md
+├── repositories
+│   ├── accounts.py
+│   ├── ads.py
+│   ├── moderation.py
+│   ├── prediction_cache.py
+│   └── users.py
+├── requirements.txt
+├── routes
+│   ├── auth.py
+│   └── predict_violation.py
+├── screencasts
+│   ├── demo_kafka.mov
+│   ├── Grafana_Screencast.mp4
+│   └── prometheus_ok.png
+├── services
+│   ├── auth.py
+│   └── predict_violation.py
+├── tests
+│   ├── conftest.py
+│   ├── test_accounts_repo.py
+│   ├── test_adds.py
+│   ├── test_auth_dependency.py
+│   ├── test_auth_routes.py
+│   ├── test_auth_service.py
+│   ├── test_prediction_cache.py
+│   ├── test_violation_model_with_db.py
+│   └── test_violation_model.py
+└── workers
+    └── moderation_worker.py
+```
+
 --------
 
 ### Запуск

@@ -1,17 +1,12 @@
-import sys
-from pathlib import Path
-
 import warnings
 
 warnings.filterwarnings("ignore")
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 import pytest
 
-from main import app
+from hse_backend.main import app
 
 
 @pytest.fixture

@@ -1,11 +1,6 @@
-import sys
-from pathlib import Path
-
 import warnings
 
 warnings.filterwarnings("ignore")
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 from fastapi.testclient import TestClient
@@ -14,12 +9,14 @@ import psycopg2
 from http import HTTPStatus
 import pytest
 from unittest.mock import patch, AsyncMock
+from pathlib import Path
 
-from main import app
-from repositories.moderation import ModerationRepository
-from workers.moderation_worker import ModerationWorker
-from repositories.users import UserRepository
-from repositories.ads import AdRepository
+from hse_backend.main import app
+from hse_backend.repositories.moderation import ModerationRepository
+from hse_backend.workers.moderation_worker import ModerationWorker
+from hse_backend.repositories.users import UserRepository
+from hse_backend.repositories.ads import AdRepository
+from hse_backend.repositories.prediction_cache import PredictionCacheStorage
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/service"
@@ -67,7 +64,7 @@ def test_simple_predict_ad_not_found(client):
     item_id = 12345
 
     with patch(
-        "routes.predict_violation.AdRepository.get_ad_with_seller",
+        "hse_backend.routes.predict_violation.AdRepository.get_ad_with_seller",
         new=AsyncMock(return_value=None),
     ):
         response = client.get(f"/predict/simple_predict/{item_id}")
@@ -363,7 +360,7 @@ async def test_simple_predict_500_prediction_failure(client):
     )
 
     with patch(
-        "routes.predict_violation.predict_violation",
+        "hse_backend.routes.predict_violation.predict_violation",
         side_effect=RuntimeError("Mocked prediction error"),
     ):
         response = client.get(f"/predict/simple_predict/{item_id}")
@@ -490,94 +487,124 @@ def test_get_moderation_result_not_found(client):
 
 # Тесты kafka и воркера
 @pytest.mark.asyncio
-@patch("workers.moderation_worker.KafkaProducer")
-@patch("workers.moderation_worker.get_pg_connection")
-async def test_worker_processes_message_success(
-    mock_pg_conn, mock_kafka_producer_class
-):
-    mock_conn = AsyncMock()
-    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
+@patch("hse_backend.workers.moderation_worker.KafkaProducer")
+@patch("hse_backend.workers.moderation_worker.get_pg_connection")
+@pytest.mark.asyncio
+@patch("hse_backend.workers.moderation_worker.KafkaProducer")
+async def test_worker_processes_message_success(mock_kafka_producer_class):
+    """
+    Unit test: Verify worker calls repository methods with correct parameters.
+    Business logic: predict_violation is called and cache/moderation is updated.
+    """
+    mock_kafka_instance = AsyncMock()
+    mock_kafka_producer_class.return_value = mock_kafka_instance
 
-    mock_conn.fetchrow.side_effect = [
-        {
-            "item_id": 101,
-            "seller_id": 202,
-            "is_verified_seller": False,
-            "name": "Test",
-            "description": "Desc",
-            "category": 1,
-            "images_qty": 0,
-        },
-        {"id": 50},
-    ]
+    ad_data = {
+        "item_id": 101,
+        "seller_id": 202,
+        "is_verified_seller": False,
+        "name": "Test",
+        "description": "Desc",
+        "category": 1,
+        "images_qty": 0,
+    }
 
-    with patch("workers.moderation_worker.load_model") as mock_load_model, patch(
-        "workers.moderation_worker.predict_violation"
-    ) as mock_predict:
+    with patch(
+        "hse_backend.workers.moderation_worker.load_model"
+    ) as mock_load_model, patch(
+        "hse_backend.workers.moderation_worker.predict_violation"
+    ) as mock_predict, patch.object(
+        AdRepository, "get_ad_with_seller", new_callable=AsyncMock
+    ) as mock_get_ad, patch.object(
+        ModerationRepository, "get_pending_by_item_id", new_callable=AsyncMock
+    ) as mock_get_pending, patch.object(
+        ModerationRepository, "update_completed", new_callable=AsyncMock
+    ) as mock_update_completed, patch.object(
+        PredictionCacheStorage, "set_prediction_cache", new_callable=AsyncMock
+    ) as mock_cache:
 
         mock_load_model.return_value = "mocked_model"
         mock_predict.return_value = {"is_violation": True, "probability": 0.92}
+        mock_get_ad.return_value = ad_data
+        mock_get_pending.return_value = {"id": 50}
 
         worker = ModerationWorker(Path("../ml_models/model.pkl"))
         success = await worker.process_message_with_retry({"item_id": 101})
 
         assert success is True
 
-        update_call = mock_conn.execute.call_args_list[-1]
-        assert "UPDATE moderation_results" in update_call[0][0]
-        assert update_call[0][1] == True
-        assert update_call[0][2] == 0.92
-        assert update_call[0][3] == 50
+        # Verify repository methods were called with correct parameters
+        mock_get_ad.assert_called_once_with(101)
+        mock_get_pending.assert_called_once_with(101)
+        mock_cache.assert_called_once_with(
+            101, {"is_violation": True, "probability": 0.92}
+        )
+        mock_update_completed.assert_called_once_with(50, True, 0.92)
 
 
 @pytest.mark.asyncio
 @patch("workers.moderation_worker.KafkaProducer")
-@patch("workers.moderation_worker.get_pg_connection")
-async def test_worker_sends_to_dlq_on_error(mock_pg_conn, mock_kafka_producer_class):
-    mock_conn = AsyncMock()
-    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
-    mock_conn.fetchrow.return_value = None
-
+async def test_worker_sends_to_dlq_on_error(mock_kafka_producer_class):
+    """
+    Unit test: Verify worker handles errors and updates status to 'failed'.
+    Tests repository methods are called with correct error parameters.
+    """
     mock_kafka_instance = AsyncMock()
     mock_kafka_producer_class.return_value = mock_kafka_instance
 
-    worker = ModerationWorker(Path("../ml_models/model.pkl"))
+    with patch(
+        "hse_backend.workers.moderation_worker.load_model"
+    ) as mock_load_model, patch.object(
+        AdRepository, "get_ad_with_seller", new_callable=AsyncMock
+    ) as mock_get_ad, patch.object(
+        ModerationRepository, "update_failed", new_callable=AsyncMock
+    ) as mock_update_failed:
 
-    success = await worker.process_message_with_retry({"item_id": 999})
-    assert success is False
+        mock_load_model.return_value = "mocked_model"
+        mock_get_ad.return_value = None  # Ad not found
 
-    update_call = mock_conn.execute.call_args_list[-1]
-    assert "UPDATE moderation_results" in update_call[0][0]
-    assert "status = 'failed'" in update_call[0][0]
-    assert "error_message" in update_call[0][0]
-    assert update_call[0][1] == "Ad with item_id = 999 not found"
-    assert update_call[0][2] == 999
+        worker = ModerationWorker(Path("../ml_models/model.pkl"))
+        success = await worker.process_message_with_retry({"item_id": 999})
 
-    # DLQ
-    mock_kafka_instance.send_json.assert_called_once()
-    args, _ = mock_kafka_instance.send_json.call_args
-    topic, message = args
-    assert topic == "moderation_dlq"
+        assert success is False
+
+        # Verify error was recorded in database
+        mock_update_failed.assert_called_once()
+        args = mock_update_failed.call_args
+        item_id = args[0][0]
+        error_msg = args[0][1]
+        assert item_id == 999
+        assert "not found" in error_msg.lower()
+
+        # DLQ
+        mock_kafka_instance.send_json.assert_called_once()
+        args, _ = mock_kafka_instance.send_json.call_args
+        topic, message = args
+        assert topic == "moderation_dlq"
     assert message["original_message"]["item_id"] == 999
     assert "not found" in message["error"]
     assert message["retry_count"] == 3
 
 
-# Тест на retry в kafka
+# Тест на retry при временной ошибке
 @pytest.mark.asyncio
 @patch(
     "workers.moderation_worker.predict_violation",
     side_effect=ConnectionError("ML service is temporarily unavailable"),
 )
-@patch("workers.moderation_worker.asyncio.sleep", new_callable=AsyncMock)
-@patch("workers.moderation_worker.get_pg_connection")
+@patch("hse_backend.workers.moderation_worker.asyncio.sleep", new_callable=AsyncMock)
+@patch("hse_backend.workers.moderation_worker.KafkaProducer")
 async def test_worker_retries_on_temporary_error(
-    mock_pg_conn, mock_sleep, mock_predict
+    mock_kafka_producer_class, mock_sleep, mock_predict
 ):
-    mock_conn = AsyncMock()
-    mock_pg_conn.return_value.__aenter__.return_value = mock_conn
+    """
+    Unit test: Verify worker retries on temporary errors and eventually fails.
+    Tests that update_failed is called with error message after max retries.
+    """
+    mock_kafka_instance = AsyncMock()
+    mock_kafka_producer_class.return_value = mock_kafka_instance
 
-    ad_row_data = {
+    ad_data = {
         "item_id": 123,
         "seller_id": 456,
         "is_verified_seller": False,
@@ -587,33 +614,37 @@ async def test_worker_retries_on_temporary_error(
         "images_qty": 0,
     }
 
-    mock_conn.fetchrow.side_effect = [
-        ad_row_data,
-        {"id": 99},
-        ad_row_data,
-        {"id": 99},
-        ad_row_data,
-        {"id": 99},
-    ]
+    with patch(
+        "hse_backend.workers.moderation_worker.load_model"
+    ) as mock_load_model, patch.object(
+        AdRepository, "get_ad_with_seller", new_callable=AsyncMock
+    ) as mock_get_ad, patch.object(
+        ModerationRepository, "get_pending_by_item_id", new_callable=AsyncMock
+    ) as mock_get_pending, patch.object(
+        ModerationRepository, "update_failed", new_callable=AsyncMock
+    ) as mock_update_failed:
 
-    worker = ModerationWorker(Path(__file__).parent.parent / "ml_models" / "model.pkl")
-    await worker.start()
+        mock_load_model.return_value = "mocked_model"
+        mock_get_ad.return_value = ad_data
+        mock_get_pending.return_value = {"id": 99}
 
-    try:
+        worker = ModerationWorker(Path("../ml_models/model.pkl"))
         success = await worker.process_message_with_retry({"item_id": 123})
 
-        assert success is False  # после трех попыток неуспех
-        assert mock_predict.call_count == 3
-        assert mock_sleep.call_count == 2
+        # After max retries, should fail
+        assert success is False
 
-        last_execute_call = mock_conn.execute.call_args_list[-1]
-        sql = last_execute_call[0][0]
-        assert "UPDATE moderation_results" in sql
-        assert "status = 'failed'" in sql
-        assert "ML service is temporarily unavailable" in last_execute_call[0][1]
+        # Verify retry mechanism
+        assert mock_predict.call_count == 3  # 3 retry attempts
+        assert mock_sleep.call_count == 2  # 2 sleeps between retries
 
-    finally:
-        await worker.stop()
+        # Verify update_failed was called with the error message
+        mock_update_failed.assert_called_once()
+        args = mock_update_failed.call_args
+        item_id = args[0][0]
+        error_msg = args[0][1]
+        assert item_id == 123
+        assert "ML service is temporarily unavailable" in error_msg
 
 
 # Отправка нескольких запросов с одним item_id
@@ -777,8 +808,8 @@ def test_close_ad_endpoint_deletes_cache(client):
 
     item_id = 6600
 
-    with patch("routes.predict_violation.ad_repo") as mock_ad_repo, patch(
-        "routes.predict_violation.cache_storage"
+    with patch("hse_backend.routes.predict_violation.ad_repo") as mock_ad_repo, patch(
+        "hse_backend.routes.predict_violation.cache_storage"
     ) as mock_cache:
 
         async def mock_close_ad(*args, **kwargs):

@@ -1,10 +1,7 @@
-import sys
 from pathlib import Path
 import warnings
 
 warnings.filterwarnings("ignore")
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 import json
@@ -14,11 +11,11 @@ from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 
-from main import app
-from repositories.prediction_cache import PredictionCacheStorage
-from clients.redis import redis_client
-from repositories.users import UserRepository
-from repositories.ads import AdRepository
+from hse_backend.main import app
+from hse_backend.repositories.prediction_cache import PredictionCacheStorage
+from hse_backend.clients.redis import redis_client
+from hse_backend.repositories.users import UserRepository
+from hse_backend.repositories.ads import AdRepository
 
 TEST_REDIS_HOST = os.getenv("TEST_REDIS_HOST", "localhost")
 TEST_REDIS_PORT = int(os.getenv("TEST_REDIS_PORT", 6379))
@@ -57,7 +54,7 @@ async def test_cache_storage_get_hit_unit(cache_storage):
     item_id = 123
     expected_result = {"is_violation": True, "probability": 0.85}
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.get = AsyncMock(return_value=json.dumps(expected_result))
 
         result = await cache_storage.get_prediction_cache(item_id)
@@ -73,7 +70,7 @@ async def test_cache_storage_get_miss_unit(cache_storage):
 
     item_id = 456
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.get = AsyncMock(return_value=None)
 
         result = await cache_storage.get_prediction_cache(item_id)
@@ -90,7 +87,7 @@ async def test_cache_storage_set_unit(cache_storage):
     item_id = 789
     prediction = {"is_violation": False, "probability": 0.12}
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.set = AsyncMock(return_value=True)
 
         result = await cache_storage.set_prediction_cache(item_id, prediction)
@@ -111,7 +108,7 @@ async def test_cache_storage_set_custom_ttl_unit(cache_storage):
     prediction = {"is_violation": True, "probability": 0.99}
     custom_ttl = 1800
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.set = AsyncMock(return_value=True)
 
         result = await cache_storage.set_prediction_cache(
@@ -130,7 +127,7 @@ async def test_cache_storage_delete_unit(cache_storage):
 
     item_id = 202
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.delete = AsyncMock(return_value=1)
 
         result = await cache_storage.delete_prediction_cache(item_id)
@@ -146,7 +143,7 @@ async def test_cache_storage_delete_not_found_unit(cache_storage):
 
     item_id = 303
 
-    with patch("repositories.prediction_cache.redis_client") as mock_redis:
+    with patch("hse_backend.repositories.prediction_cache.redis_client") as mock_redis:
         mock_redis.delete = AsyncMock(return_value=0)
 
         result = await cache_storage.delete_prediction_cache(item_id)
@@ -313,8 +310,10 @@ def test_simple_predict_cache_hit_returns_early(client):
     item_id = 7777
     cached_result = {"is_violation": False, "probability": 0.15}
 
-    with patch("routes.predict_violation.cache_storage") as mock_cache, patch(
-        "routes.predict_violation.ad_repo"
+    with patch(
+        "hse_backend.routes.predict_violation.cache_storage"
+    ) as mock_cache, patch(
+        "hse_backend.routes.predict_violation.ad_repo"
     ) as mock_ad_repo:
 
         async def mock_get_cache(*args, **kwargs):
@@ -347,16 +346,19 @@ def test_simple_predict_cache_miss_calls_db_and_model(client):
     prediction_result = {"is_violation": True, "probability": 0.95}
 
     with patch(
-        "routes.predict_violation.predict_violation", return_value=prediction_result
+        "hse_backend.routes.predict_violation.predict_violation",
+        return_value=prediction_result,
     ):
-        with patch("routes.predict_violation.ad_repo") as mock_ad_repo:
+        with patch("hse_backend.routes.predict_violation.ad_repo") as mock_ad_repo:
 
             async def mock_get_ad(*args, **kwargs):
                 return ad_data
 
             mock_ad_repo.get_ad_with_seller = mock_get_ad
 
-            with patch("routes.predict_violation.cache_storage") as mock_cache:
+            with patch(
+                "hse_backend.routes.predict_violation.cache_storage"
+            ) as mock_cache:
 
                 async def mock_get_cache(*args, **kwargs):
                     return None
@@ -380,8 +382,8 @@ def test_close_ad_endpoint_cache_invalidation_unit(client):
 
     item_id = 9999
 
-    with patch("routes.predict_violation.ad_repo") as mock_ad_repo, patch(
-        "routes.predict_violation.cache_storage"
+    with patch("hse_backend.routes.predict_violation.ad_repo") as mock_ad_repo, patch(
+        "hse_backend.routes.predict_violation.cache_storage"
     ) as mock_cache:
 
         async def mock_close_ad(*args, **kwargs):
@@ -401,7 +403,7 @@ def test_close_ad_endpoint_cache_invalidation_unit(client):
 def test_close_ad_endpoint_ad_not_found_unit(client):
     item_id = 10000
 
-    with patch("routes.predict_violation.ad_repo") as mock_ad_repo:
+    with patch("hse_backend.routes.predict_violation.ad_repo") as mock_ad_repo:
 
         async def mock_close_ad(*args, **kwargs):
             return False

@@ -1,15 +1,13 @@
+import sys
 import pytest
 from datetime import datetime, timedelta, timezone
 from jwt import PyJWTError
 import jwt
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from services.auth import AuthService
-from models.account import Account
+from hse_backend.services.auth import AuthService
+from hse_backend.models.account import Account
 
 import warnings
 

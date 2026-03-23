@@ -2,7 +2,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
-from clients.redis import redis_client
+from hse_backend.clients.redis import redis_client
 
 
 class PredictionCacheStorage:
