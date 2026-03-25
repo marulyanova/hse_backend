@@ -18,19 +18,38 @@ async def init_pool() -> asyncpg.Pool:
         database="service",
         host="localhost",
         port=5435,
-        min_size=5,
-        max_size=20,
+        min_size=1,
+        max_size=10,
     )
     _pools[id(loop)] = pool
     return pool
 
 
 async def close_pool() -> None:
-    """Close the connection pool for the current event loop."""
-    loop = asyncio.get_running_loop()
-    pool = _pools.pop(id(loop), None)
-    if pool is not None:
-        await pool.close()
+    """Close all connection pools."""
+    pools_to_close = list(_pools.values())
+    _pools.clear()
+
+    for pool in pools_to_close:
+        try:
+            await asyncio.wait_for(pool.close(), timeout=5.0)
+        except asyncio.TimeoutError:
+            # Force terminate if close times out
+            pool.terminate()
+        except RuntimeError as e:
+            if "Event loop is closed" in str(
+                e
+            ) or "attached to a different loop" in str(e):
+                # Loop is already closed or task is attached to different loop, just terminate the pool
+                pool.terminate()
+            else:
+                raise
+        except Exception:
+            # For any other exception, try to terminate the pool
+            try:
+                pool.terminate()
+            except Exception:
+                pass
 
 
 def get_pool() -> asyncpg.Pool:

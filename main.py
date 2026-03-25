@@ -3,6 +3,11 @@ from contextlib import asynccontextmanager
 import os
 import logging
 from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from hse_backend.ml_models.model import train_model, save_model, load_model
 from hse_backend.routes.predict_violation import router as predict_violation_router

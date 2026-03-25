@@ -3,8 +3,14 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
+import sys
 
 from aiokafka import AIOKafkaConsumer
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from hse_backend.ml_models.model import load_model
 from hse_backend.services.predict_violation import predict_violation
 from hse_backend.models.advertisement import Advertisement
