@@ -21,3 +21,16 @@ class AccountPublic(BaseModel):
     is_blocked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoginRequest(BaseModel):
+    # модель для login request body
+
+    login: str = Field(..., min_length=1, description="User login")
+    password: str = Field(..., min_length=1, description="User password")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"login": "user@example.com", "password": "secure_password"}
+        }
+    )

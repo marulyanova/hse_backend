@@ -97,6 +97,17 @@ from hse_backend.repositories.ads import AdRepository
 import uuid
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def clear_account_cache():
+    """Clear all account cache before each test"""
+    try:
+        await redis_client.delete_pattern("account:*")
+    except Exception:
+        pass
+
+    yield
+
+
 @pytest.fixture(scope="function")
 def authenticated_client(event_loop):
     """Фикстура для аутентифицированного клиента"""
@@ -114,15 +125,24 @@ def authenticated_client(event_loop):
         # Создаем аккаунт
         account = await account_repo.create_account(login=login, password=password)
 
-        # Логинимся
+        # Логинимся с JSON body
         client = TestClient(app)
-        response = client.post("/login", params={"login": login, "password": password})
+        response = client.post("/login", json={"login": login, "password": password})
         assert response.status_code == 200
 
-        return client
+        return client, account["id"]
 
-    client = event_loop.run_until_complete(setup())
+    client, account_id = event_loop.run_until_complete(setup())
     yield client
+
+    # Clear Redis cache for this account after test
+    async def cleanup():
+        try:
+            await redis_client.delete(f"account:{account_id}")
+        except Exception:
+            pass
+
+    event_loop.run_until_complete(cleanup())
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -1,7 +1,10 @@
 import time
+import json
 from typing import Optional, Dict, Any
 from hse_backend.clients.postgres import get_pg_connection
+from hse_backend.clients.redis import redis_client
 from hse_backend.metrics import DB_QUERY_DURATION
+from hse_backend.services.auth import AuthService
 
 
 class AccountRepository:
@@ -14,6 +17,9 @@ class AccountRepository:
         if not password or not isinstance(password, str):
             raise ValueError("password must be a non-empty string")
 
+        # Hash password before storing
+        hashed_password = AuthService.hash_password(password)
+
         query = """
             INSERT INTO account (login, password, is_blocked)
             VALUES ($1, $2, $3)
@@ -21,7 +27,7 @@ class AccountRepository:
         """
         start = time.time()
         async with get_pg_connection() as conn:
-            row = await conn.fetchrow(query, login, password, is_blocked)
+            row = await conn.fetchrow(query, login, hashed_password, is_blocked)
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="insert", table="account").observe(duration)
 
@@ -32,6 +38,21 @@ class AccountRepository:
     async def get_account_by_id(self, account_id: int) -> Optional[Dict[str, Any]]:
         if not isinstance(account_id, int) or account_id <= 0:
             raise ValueError("account_id must be a positive integer")
+
+        # Try to get from cache first
+        cache_key = f"account:{account_id}"
+
+        try:
+            cached_account = await redis_client.get(cache_key)
+            if cached_account:
+                return (
+                    json.loads(cached_account)
+                    if isinstance(cached_account, str)
+                    else cached_account
+                )
+        except Exception as e:
+            print(f"Redis cache get error: {e}")
+            # Continue to DB if cache fails
 
         query = """
             SELECT id, login, password, is_blocked
@@ -44,7 +65,19 @@ class AccountRepository:
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="select", table="account").observe(duration)
 
-        return dict(row) if row else None
+        if not row:
+            return None
+
+        account_dict = dict(row)
+
+        # Cache the result for 5 minutes (300 seconds)
+        try:
+            await redis_client.set(cache_key, account_dict, ttl_seconds=300)
+        except Exception as e:
+            print(f"Redis cache set error: {e}")
+            # Don't fail if cache write fails
+
+        return account_dict
 
     # найти аккаунт по логину
     async def get_account_by_login(self, login: str) -> Optional[Dict[str, Any]]:
@@ -59,27 +92,6 @@ class AccountRepository:
         start = time.time()
         async with get_pg_connection() as conn:
             row = await conn.fetchrow(query, login)
-        duration = time.time() - start
-        DB_QUERY_DURATION.labels(query_type="select", table="account").observe(duration)
-
-        return dict(row) if row else None
-
-    async def get_account_by_login_password(
-        self, login: str, password: str
-    ) -> Optional[Dict[str, Any]]:
-        if not login or not isinstance(login, str):
-            raise ValueError("login must be a non-empty string")
-        if not password or not isinstance(password, str):
-            raise ValueError("password must be a non-empty string")
-
-        query = """
-            SELECT id, login, password, is_blocked
-            FROM account
-            WHERE login = $1 AND password = $2 AND is_blocked = false;
-        """
-        start = time.time()
-        async with get_pg_connection() as conn:
-            row = await conn.fetchrow(query, login, password)
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="select", table="account").observe(duration)
 
@@ -101,6 +113,14 @@ class AccountRepository:
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="delete", table="account").observe(duration)
 
+        if row:
+            # Invalidate cache
+            cache_key = f"account:{account_id}"
+            try:
+                await redis_client.delete(cache_key)
+            except Exception as e:
+                print(f"Redis cache delete error: {e}")
+
         return row is not None
 
     # заблокировать аккаунт
@@ -120,6 +140,13 @@ class AccountRepository:
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="update", table="account").observe(duration)
 
+        # Invalidate cache
+        cache_key = f"account:{account_id}"
+        try:
+            await redis_client.delete(cache_key)
+        except Exception as e:
+            print(f"Redis cache delete error: {e}")
+
         return row is not None
 
     # разблокировать аккаунт
@@ -138,5 +165,12 @@ class AccountRepository:
             row = await conn.fetchrow(query, account_id)
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="update", table="account").observe(duration)
+
+        # Invalidate cache
+        cache_key = f"account:{account_id}"
+        try:
+            await redis_client.delete(cache_key)
+        except Exception as e:
+            print(f"Redis cache delete error: {e}")
 
         return row is not None
