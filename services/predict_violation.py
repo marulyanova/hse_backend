@@ -1,11 +1,7 @@
 import numpy as np
 import time
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from metrics import (
+from hse_backend.metrics import (
     PREDICTIONS_TOTAL,
     PREDICTION_DURATION,
     PREDICTION_ERRORS_TOTAL,

@@ -41,12 +41,22 @@ class RedisClient:
 
     async def close(self):
         if self._client:
-            await self._client.aclose()
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
             self._client = None
             self._connected = False
-            if self._pool:
+
+        if self._pool:
+            try:
                 await self._pool.disconnect()
-                self._pool = None
+            except RuntimeError as e:
+                if "got Future" not in str(e) and "Event loop is closed" not in str(e):
+                    raise
+            except Exception:
+                pass
+            self._pool = None
 
     async def get(self, key: str) -> Optional[Any]:
 
@@ -120,6 +130,25 @@ class RedisClient:
             return bool(await self._client.exists(key))
         except Exception as e:
             return False
+
+    async def delete_pattern(self, pattern: str) -> int:
+        """Удалить все ключи, соответствующие шаблону. Возвращает количество удаленных ключей."""
+        if not self._connected:
+            try:
+                await self.connect()
+            except Exception:
+                return 0
+
+        if self._client is None:
+            return 0
+
+        try:
+            keys = await self._client.keys(pattern)
+            if keys:
+                return await self._client.delete(*keys)
+            return 0
+        except Exception as e:
+            return 0
 
 
 redis_client = RedisClient(

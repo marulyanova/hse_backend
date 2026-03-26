@@ -4,3 +4,12 @@ mlflow
 redis>=5.0.0
 prometheus-client
 pyjwt
+fastapi
+uvicorn
+asyncpg
+aiokafka
+starlette
+pydantic
+psycopg2-binary
+pytest
+pytest-asyncio

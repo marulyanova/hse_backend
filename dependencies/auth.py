@@ -1,9 +1,9 @@
 from fastapi import Depends, HTTPException, status, Cookie, Request
 from typing import Annotated, Optional
 
-from services.auth import AuthService
-from repositories.accounts import AccountRepository
-from models.account import Account, AccountPublic
+from hse_backend.services.auth import AuthService
+from hse_backend.repositories.accounts import AccountRepository
+from hse_backend.models.account import Account, AccountPublic
 
 
 def get_auth_service() -> AuthService:

@@ -1,19 +1,23 @@
 import asyncio
 import json
-import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import sys
 
 from aiokafka import AIOKafkaConsumer
-from clients.postgres import get_pg_connection
-from ml_models.model import load_model
-from services.predict_violation import predict_violation
-from models.advertisement import Advertisement
-from clients.kafka import KafkaProducer
-from repositories.prediction_cache import PredictionCacheStorage
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from hse_backend.ml_models.model import load_model
+from hse_backend.services.predict_violation import predict_violation
+from hse_backend.models.advertisement import Advertisement
+from hse_backend.clients.kafka import KafkaProducer
+from hse_backend.repositories.prediction_cache import PredictionCacheStorage
+from hse_backend.repositories.ads import AdRepository
+from hse_backend.repositories.moderation import ModerationRepository
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5
@@ -29,6 +33,8 @@ class ModerationWorker:
         self.model = load_model(model_path)
         self.kafka_producer = KafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
         self.cache_storage = PredictionCacheStorage()
+        self.ad_repo = AdRepository()
+        self.moderation_repo = ModerationRepository()
 
     async def start(self):
         await self.kafka_producer.start()
@@ -42,57 +48,29 @@ class ModerationWorker:
         item_id = message_data["item_id"]
 
         try:
-            async with get_pg_connection() as conn:
-                ad_row = await conn.fetchrow(
-                    """
-                    SELECT 
-                        a.item_id,
-                        a.seller_id,
-                        u.is_verified AS is_verified_seller,
-                        a.name,
-                        a.description,
-                        a.category,
-                        a.images_qty
-                    FROM ads a
-                    JOIN users u ON a.seller_id = u.id
-                    WHERE a.item_id = $1
-                    """,
-                    item_id,
-                )
-                if not ad_row:
-                    raise ValueError(f"Ad with item_id = {item_id} not found")
+            # получаем данные объявления и продавца через репозиторий
+            ad_data = await self.ad_repo.get_ad_with_seller(item_id)
+            if not ad_data:
+                raise ValueError(f"Ad with item_id = {item_id} not found")
 
-                mod_row = await conn.fetchrow(
-                    """
-                    SELECT id FROM moderation_results 
-                    WHERE item_id = $1 AND status = 'pending'
-                    """,
-                    item_id,
-                )
-                if not mod_row:
-                    raise ValueError(f"No pending task for item_id = {item_id}")
+            # проверяем, что для данного item_id есть ожидающая задача модерации
+            mod_record = await self.moderation_repo.get_pending_by_item_id(item_id)
+            if not mod_record:
+                raise ValueError(f"No pending task for item_id = {item_id}")
 
-                task_id = mod_row["id"]
+            task_id = mod_record["id"]
 
-            ad_model = Advertisement(**dict(ad_row))
+            # создаем модель объявления и делаем предсказание
+            ad_model = Advertisement(**ad_data)
             result = predict_violation(self.model, ad_model)
 
+            # кэшируем результат предсказания
             await self.cache_storage.set_prediction_cache(item_id, result)
 
-            async with get_pg_connection() as conn:
-                await conn.execute(
-                    """
-                    UPDATE moderation_results
-                    SET status = 'completed',
-                        is_violation = $1,
-                        probability = $2,
-                        processed_at = NOW()
-                    WHERE id = $3
-                    """,
-                    result["is_violation"],
-                    result["probability"],
-                    task_id,
-                )
+            # обновляем статус задачи модерации с результатами через репозиторий
+            await self.moderation_repo.update_completed(
+                task_id, result["is_violation"], result["probability"]
+            )
             return True
 
         except Exception as e:
@@ -103,21 +81,12 @@ class ModerationWorker:
                     message_data, retry_count + 1
                 )
             else:
-                async with get_pg_connection() as conn:
-                    await conn.execute(
-                        """
-                        UPDATE moderation_results
-                        SET status = 'failed',
-                            error_message = $1,
-                            processed_at = NOW()
-                        WHERE item_id = $2 AND status = 'pending'
-                        """,
-                        error_msg,
-                        item_id,
-                    )
+                # обновляем статус задачи модерации как failed через репозиторий и отправляем в DLQ
+                await self.moderation_repo.update_failed(item_id, error_msg)
                 await self.send_to_dlq(message_data, error_msg, retry_count + 1)
                 return False
 
+    # отправляем сообщение в DLQ с информацией об ошибке и количестве попыток
     async def send_to_dlq(self, original_message: dict, error: str, retry_count: int):
         dlq_message = {
             "original_message": original_message,
@@ -133,6 +102,11 @@ async def main():
     if not model_path.exists():
         print("Model file not found")
         return
+
+    # Initialize database pool
+    from hse_backend.clients.postgres import init_pool, close_pool
+
+    await init_pool()
 
     worker = ModerationWorker(model_path)
     await worker.start()
@@ -166,6 +140,7 @@ async def main():
     finally:
         await consumer.stop()
         await worker.stop()
+        await close_pool()
 
 
 if __name__ == "__main__":

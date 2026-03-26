@@ -1,29 +1,25 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from fastapi import APIRouter, HTTPException, status, Request
 import logging
 
-from models.advertisement import (
+from hse_backend.models.advertisement import (
     Advertisement,
     AsyncPredictResponse,
     AsyncPredictRequest,
     ModerationResultResponse,
 )
-from services.predict_violation import predict_violation
-from repositories.ads import AdRepository
-from repositories.moderation import ModerationRepository, ModerationResultNotFoundError
-from repositories.prediction_cache import PredictionCacheStorage
-from clients.kafka import KafkaProducer
-from dependencies.auth import CurrentAccount
+from hse_backend.services.predict_violation import predict_violation
+from hse_backend.repositories.ads import AdRepository
+from hse_backend.repositories.moderation import (
+    ModerationRepository,
+    ModerationResultNotFoundError,
+)
+from hse_backend.repositories.prediction_cache import PredictionCacheStorage
+from hse_backend.dependencies.auth import CurrentAccount
 
 router = APIRouter()
 ad_repo = AdRepository()
 moderation_repo = ModerationRepository()
 cache_storage = PredictionCacheStorage()
-kafka_producer = KafkaProducer(bootstrap_servers="localhost:9092")
 
 
 @router.post("/")
@@ -168,6 +164,9 @@ async def async_predict(
 
 @router.get("/moderation_result/{task_id}", response_model=ModerationResultResponse)
 async def get_moderation_result(task_id: int, current_account: CurrentAccount):
+    """
+    Получить результат модерации по task_id. Если результат уже есть, вернуть его. Если задача все еще в процессе, вернуть статус pending. Если задачи нет, вернуть 404.
+    """
     if task_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -181,6 +180,15 @@ async def get_moderation_result(task_id: int, current_account: CurrentAccount):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task with id = {task_id} not found",
         )
+
+    # Cache completed results for future retrieval
+    if record["status"] == "completed" and record.get("is_violation") is not None:
+        item_id = record["item_id"]
+        prediction = {
+            "is_violation": record.get("is_violation"),
+            "probability": record.get("probability"),
+        }
+        await cache_storage.set_prediction_cache(item_id, prediction)
 
     return ModerationResultResponse(
         task_id=record["id"],

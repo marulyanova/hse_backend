@@ -1,14 +1,15 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 import pytest
 from unittest.mock import patch
 
-from main import app
+from hse_backend.main import app
+
+import warnings
+
+warnings.filterwarnings("ignore")
+
+pytestmark = [pytest.mark.unit]
 
 
 @pytest.fixture
@@ -97,8 +98,8 @@ def test_root(client):
         ),
     ],
 )
-def test_predict_violation(client, input_data, expected_is_violation):
-    response = client.post("/predict", json=input_data)
+def test_predict_violation(authenticated_client, input_data, expected_is_violation):
+    response = authenticated_client.post("/predict", json=input_data)
     assert response.status_code == HTTPStatus.OK
 
     result = response.json()
@@ -107,18 +108,18 @@ def test_predict_violation(client, input_data, expected_is_violation):
     assert 0.0 <= result["probability"] <= 1.0
 
 
-def test_params_validation(client, invalid_payloads):
+def test_params_validation(authenticated_client, invalid_payloads):
     for payload in invalid_payloads:
-        response = client.post("/predict", json=payload)
+        response = authenticated_client.post("/predict", json=payload)
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
-def test_predict_503_model_not_loaded(client):
+def test_predict_503_model_not_loaded(authenticated_client):
     # удаление модели
     original_model = app.state.models.pop("violation_model", None)
 
     try:
-        response = client.post(
+        response = authenticated_client.post(
             "/predict",
             json={
                 "seller_id": 123,
@@ -138,7 +139,7 @@ def test_predict_503_model_not_loaded(client):
             app.state.models["violation_model"] = original_model
 
 
-def test_predict_500_prediction_failure(client):
+def test_predict_500_prediction_failure(authenticated_client):
     valid_data = {
         "seller_id": 123,
         "is_verified_seller": False,
@@ -151,9 +152,9 @@ def test_predict_500_prediction_failure(client):
 
     # замена функции predict_violation, чтобы было исключение
     with patch(
-        "routes.predict_violation.predict_violation",
+        "hse_backend.routes.predict_violation.predict_violation",
         side_effect=RuntimeError("Mocked prediction error"),
     ):
-        response = client.post("/predict", json=valid_data)
+        response = authenticated_client.post("/predict", json=valid_data)
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         assert "Prediction failed with error" in response.json()["detail"]

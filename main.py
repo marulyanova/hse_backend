@@ -1,24 +1,26 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 import os
 import logging
+from pathlib import Path
+import sys
 
-from ml_models.model import train_model, save_model, load_model
-from routes.predict_violation import router as predict_violation_router
-from routes.auth import router as auth_router
-from clients.kafka import KafkaProducer
-from clients.redis import redis_client
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from hse_backend.ml_models.model import train_model, save_model, load_model
+from hse_backend.routes.predict_violation import router as predict_violation_router
+from hse_backend.routes.auth import router as auth_router
+from hse_backend.clients.kafka import KafkaProducer
+from hse_backend.clients.redis import redis_client
+from hse_backend.clients.postgres import init_pool, close_pool
 
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from metrics import REQUEST_COUNT, REQUEST_DURATION
+from hse_backend.metrics import REQUEST_COUNT, REQUEST_DURATION
 
 logging.basicConfig(level=logging.INFO)
 
@@ -66,6 +68,8 @@ async def lifespan(app: FastAPI):
     if "violation_model" not in app.state.models:
         raise RuntimeError("Failed to load or train the violation model")
 
+    await init_pool()
+
     await redis_client.connect()
     app.state.redis_client = redis_client
 
@@ -77,9 +81,23 @@ async def lifespan(app: FastAPI):
 
     await kafka_producer.stop()
     await redis_client.close()
+    await close_pool()
+
+
+class NoopKafkaProducer:
+    async def start(self):
+        return None
+
+    async def stop(self):
+        return None
+
+    async def send_moderation_request(self, item_id):
+        logging.info(f"NoopKafkaProducer: send_moderation_request({item_id})")
+        return None
 
 
 app = FastAPI(lifespan=lifespan)
+app.state.kafka_producer = NoopKafkaProducer()
 app.add_middleware(PrometheusMiddleware)
 
 

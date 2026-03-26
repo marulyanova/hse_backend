@@ -2,9 +2,9 @@ import pytest
 from fastapi import HTTPException, status
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from dependencies.auth import get_current_account
-from models.account import AccountPublic
-from services.auth import AuthService
+from hse_backend.dependencies.auth import get_current_account
+from hse_backend.models.account import AccountPublic
+from hse_backend.services.auth import AuthService
 
 import warnings
 

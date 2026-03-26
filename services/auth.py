@@ -1,5 +1,6 @@
 import os
 import jwt
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from jwt import (
@@ -9,12 +10,7 @@ from jwt import (
     InvalidSignatureError,
 )
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from models.account import Account, AccountPublic
+from hse_backend.models.account import Account, AccountPublic
 
 
 class AuthService:
@@ -30,6 +26,16 @@ class AuthService:
 
         if not isinstance(self.secret_key, str):
             raise TypeError(f"secret_key must be str, got {type(self.secret_key)}")
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """Хэширование пароля SHA256"""
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """Верификация пароля путем сравнения хэшей"""
+        return AuthService.hash_password(plain_password) == hashed_password
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         if not token or not isinstance(token, str):
@@ -96,3 +102,27 @@ class AuthService:
             )
         except (KeyError, ValueError, TypeError, AttributeError):
             return None
+
+    async def authenticate_user(
+        self, account_repo: "AccountRepository", login: str, password: str
+    ) -> Optional[Account]:
+        """
+        Authenticate user by login and password.
+        Returns Account if credentials are valid, None otherwise.
+        """
+        from hse_backend.repositories.accounts import AccountRepository
+
+        # найти аккаунт по логину
+        account_data = await account_repo.get_account_by_login(login)
+        if not account_data:
+            return None
+
+        # проверить пароль
+        if not self.verify_password(password, account_data["password"]):
+            return None
+
+        # проверить, не заблокирован ли аккаунт
+        if account_data.get("is_blocked"):
+            return None
+
+        return Account(**account_data)

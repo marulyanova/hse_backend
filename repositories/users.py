@@ -1,7 +1,7 @@
 import time
 from typing import Optional
-from clients.postgres import get_pg_connection
-from metrics import DB_QUERY_DURATION
+from hse_backend.clients.postgres import get_pg_connection
+from hse_backend.metrics import DB_QUERY_DURATION
 
 
 class UserRepository:

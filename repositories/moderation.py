@@ -1,8 +1,8 @@
 import time
 from dataclasses import dataclass
-from typing import Mapping, Any
-from clients.postgres import get_pg_connection
-from metrics import DB_QUERY_DURATION
+from typing import Mapping, Any, Optional
+from hse_backend.clients.postgres import get_pg_connection
+from hse_backend.metrics import DB_QUERY_DURATION
 
 
 class ModerationResultNotFoundError(Exception):
@@ -42,6 +42,57 @@ class ModerationResultStorage:
             raise ModerationResultNotFoundError()
         return dict(row)
 
+    async def get_pending_by_item_id(self, item_id: int) -> Optional[Mapping[str, Any]]:
+        query = """
+            SELECT id FROM moderation_results 
+            WHERE item_id = $1 AND status = 'pending'
+        """
+        start = time.time()
+        async with get_pg_connection() as conn:
+            row = await conn.fetchrow(query, item_id)
+        duration = time.time() - start
+        DB_QUERY_DURATION.labels(
+            query_type="select", table="moderation_results"
+        ).observe(duration)
+        return dict(row) if row else None
+
+    async def update_completed(
+        self, task_id: int, is_violation: bool, probability: float
+    ) -> None:
+        """Пометить результат модерации как завершенный с результатами предсказания."""
+        query = """
+            UPDATE moderation_results
+            SET status = 'completed',
+                is_violation = $1,
+                probability = $2,
+                processed_at = NOW()
+            WHERE id = $3
+        """
+        start = time.time()
+        async with get_pg_connection() as conn:
+            await conn.execute(query, is_violation, probability, task_id)
+        duration = time.time() - start
+        DB_QUERY_DURATION.labels(
+            query_type="update", table="moderation_results"
+        ).observe(duration)
+
+    async def update_failed(self, item_id: int, error_message: str) -> None:
+        """Пометить результат модерации как неудачный с сообщением об ошибке."""
+        query = """
+            UPDATE moderation_results
+            SET status = 'failed',
+                error_message = $1,
+                processed_at = NOW()
+            WHERE item_id = $2 AND status = 'pending'
+        """
+        start = time.time()
+        async with get_pg_connection() as conn:
+            await conn.execute(query, error_message, item_id)
+        duration = time.time() - start
+        DB_QUERY_DURATION.labels(
+            query_type="update", table="moderation_results"
+        ).observe(duration)
+
 
 @dataclass(frozen=True)
 class ModerationRepository:
@@ -52,3 +103,15 @@ class ModerationRepository:
 
     async def get_by_id(self, task_id: int) -> dict:
         return await self.storage.get_by_id(task_id)
+
+    async def get_pending_by_item_id(self, item_id: int) -> Optional[dict]:
+        result = await self.storage.get_pending_by_item_id(item_id)
+        return result
+
+    async def update_completed(
+        self, task_id: int, is_violation: bool, probability: float
+    ) -> None:
+        await self.storage.update_completed(task_id, is_violation, probability)
+
+    async def update_failed(self, item_id: int, error_message: str) -> None:
+        await self.storage.update_failed(item_id, error_message)
