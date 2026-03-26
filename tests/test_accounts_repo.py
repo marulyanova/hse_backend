@@ -11,7 +11,12 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-pytestmark = [pytest.mark.integration_acc, pytest.mark.asyncio, pytest.mark.auth]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.integration_acc,
+    pytest.mark.asyncio,
+    pytest.mark.auth,
+]
 
 
 @pytest_asyncio.fixture
@@ -25,18 +30,16 @@ async def account_repo() -> AsyncGenerator[AccountRepository, None]:
 async def cleanup_test_accounts():
     yield
     async with get_pg_connection() as conn:
-        # Get all test account IDs to clear their cache
+
         rows = await conn.fetch("SELECT id FROM account WHERE login LIKE 'test_%'")
         account_ids = [row["id"] for row in rows]
 
-        # Clear Redis cache for these accounts
         for account_id in account_ids:
             try:
                 await redis_client.delete(f"account:{account_id}")
             except Exception:
                 pass
 
-        # Delete accounts from database
         await conn.execute("DELETE FROM account WHERE login LIKE 'test_%'")
 
 

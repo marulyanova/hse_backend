@@ -17,6 +17,8 @@ from hse_backend.clients.redis import redis_client
 from hse_backend.repositories.users import UserRepository
 from hse_backend.repositories.ads import AdRepository
 
+pytestmark = [pytest.mark.integration]
+
 TEST_REDIS_HOST = os.getenv("TEST_REDIS_HOST", "localhost")
 TEST_REDIS_PORT = int(os.getenv("TEST_REDIS_PORT", 6379))
 TEST_REDIS_DB = int(os.getenv("TEST_REDIS_DB", 1))

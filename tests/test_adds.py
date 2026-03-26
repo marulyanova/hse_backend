@@ -8,6 +8,8 @@ import pytest
 
 from hse_backend.main import app
 
+pytestmark = [pytest.mark.unit]
+
 
 @pytest.fixture
 def client():

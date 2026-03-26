@@ -68,7 +68,6 @@ async def lifespan(app: FastAPI):
     if "violation_model" not in app.state.models:
         raise RuntimeError("Failed to load or train the violation model")
 
-    # Initialize database pool
     await init_pool()
 
     await redis_client.connect()
@@ -85,7 +84,20 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
+class NoopKafkaProducer:
+    async def start(self):
+        return None
+
+    async def stop(self):
+        return None
+
+    async def send_moderation_request(self, item_id):
+        logging.info(f"NoopKafkaProducer: send_moderation_request({item_id})")
+        return None
+
+
 app = FastAPI(lifespan=lifespan)
+app.state.kafka_producer = NoopKafkaProducer()
 app.add_middleware(PrometheusMiddleware)
 
 

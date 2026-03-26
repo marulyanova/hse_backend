@@ -48,26 +48,26 @@ class ModerationWorker:
         item_id = message_data["item_id"]
 
         try:
-            # Get ad data using repository
+            # получаем данные объявления и продавца через репозиторий
             ad_data = await self.ad_repo.get_ad_with_seller(item_id)
             if not ad_data:
                 raise ValueError(f"Ad with item_id = {item_id} not found")
 
-            # Get pending moderation record using repository
+            # проверяем, что для данного item_id есть ожидающая задача модерации
             mod_record = await self.moderation_repo.get_pending_by_item_id(item_id)
             if not mod_record:
                 raise ValueError(f"No pending task for item_id = {item_id}")
 
             task_id = mod_record["id"]
 
-            # Create Advertisement model and make prediction
+            # создаем модель объявления и делаем предсказание
             ad_model = Advertisement(**ad_data)
             result = predict_violation(self.model, ad_model)
 
-            # Cache the prediction result
+            # кэшируем результат предсказания
             await self.cache_storage.set_prediction_cache(item_id, result)
 
-            # Update moderation result as completed using repository
+            # обновляем статус задачи модерации с результатами через репозиторий
             await self.moderation_repo.update_completed(
                 task_id, result["is_violation"], result["probability"]
             )
@@ -81,11 +81,12 @@ class ModerationWorker:
                     message_data, retry_count + 1
                 )
             else:
-                # Update moderation result as failed using repository
+                # обновляем статус задачи модерации как failed через репозиторий и отправляем в DLQ
                 await self.moderation_repo.update_failed(item_id, error_msg)
                 await self.send_to_dlq(message_data, error_msg, retry_count + 1)
                 return False
 
+    # отправляем сообщение в DLQ с информацией об ошибке и количестве попыток
     async def send_to_dlq(self, original_message: dict, error: str, retry_count: int):
         dlq_message = {
             "original_message": original_message,

@@ -43,7 +43,6 @@ class ModerationResultStorage:
         return dict(row)
 
     async def get_pending_by_item_id(self, item_id: int) -> Optional[Mapping[str, Any]]:
-        """Get pending moderation record for the given item_id."""
         query = """
             SELECT id FROM moderation_results 
             WHERE item_id = $1 AND status = 'pending'
@@ -60,7 +59,7 @@ class ModerationResultStorage:
     async def update_completed(
         self, task_id: int, is_violation: bool, probability: float
     ) -> None:
-        """Update moderation result as completed."""
+        """Пометить результат модерации как завершенный с результатами предсказания."""
         query = """
             UPDATE moderation_results
             SET status = 'completed',
@@ -78,7 +77,7 @@ class ModerationResultStorage:
         ).observe(duration)
 
     async def update_failed(self, item_id: int, error_message: str) -> None:
-        """Update moderation result as failed."""
+        """Пометить результат модерации как неудачный с сообщением об ошибке."""
         query = """
             UPDATE moderation_results
             SET status = 'failed',

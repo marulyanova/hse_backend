@@ -19,6 +19,8 @@ from hse_backend.repositories.users import UserRepository
 from hse_backend.repositories.ads import AdRepository
 from hse_backend.repositories.prediction_cache import PredictionCacheStorage
 
+pytestmark = [pytest.mark.integration]
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5435/service"
 )
@@ -384,6 +386,7 @@ async def test_simple_predict_500_prediction_failure(authenticated_client):
 
 
 # Тесты ручки /async_predict
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_async_predict_creates_moderation_task(authenticated_client):
     user_repo = UserRepository()
@@ -552,7 +555,6 @@ async def test_worker_processes_message_success(mock_kafka_producer_class):
 
         assert success is True
 
-        # Verify repository methods were called with correct parameters
         mock_get_ad.assert_called_once_with(101)
         mock_get_pending.assert_called_once_with(101)
         mock_cache.assert_called_once_with(
@@ -582,15 +584,14 @@ async def test_worker_sends_to_dlq_on_error(mock_kafka_producer_class):
     ) as mock_update_failed:
 
         mock_load_model.return_value = "mocked_model"
-        mock_get_ad.return_value = None  # Ad not found
+        mock_get_ad.return_value = None
 
         worker = ModerationWorker(Path("../ml_models/model.pkl"))
-        await worker.start()  # Start the producer
+        await worker.start()
         success = await worker.process_message_with_retry({"item_id": 999})
 
         assert success is False
 
-        # Verify error was recorded in database
         mock_update_failed.assert_called_once()
         args = mock_update_failed.call_args
         item_id = args[0][0]
@@ -653,14 +654,14 @@ async def test_worker_retries_on_temporary_error(
         await worker.start()
         success = await worker.process_message_with_retry({"item_id": 123})
 
-        # After max retries, should fail
+        # после 3 попыток должно вернуться False
         assert success is False
 
-        # Verify retry mechanism
-        assert mock_predict.call_count == 3  # 3 retry attempts
-        assert mock_sleep.call_count == 2  # 2 sleeps between retries
+        # механизм ретраев должен сработать 3 раза, между ними должны быть 2 паузы
+        assert mock_predict.call_count == 3
+        assert mock_sleep.call_count == 2
 
-        # Verify update_failed was called with the error message
+        # update_failed должен быть вызван после 3 неудачных попыток с правильными параметрами
         mock_update_failed.assert_called_once()
         args = mock_update_failed.call_args
         item_id = args[0][0]
@@ -670,6 +671,7 @@ async def test_worker_retries_on_temporary_error(
 
 
 # Отправка нескольких запросов с одним item_id
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_multiple_async_predict_same_item(authenticated_client):
     user_repo = UserRepository()

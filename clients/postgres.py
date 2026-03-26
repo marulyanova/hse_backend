@@ -7,7 +7,7 @@ _pools: Dict[int, asyncpg.Pool] = {}
 
 
 async def init_pool() -> asyncpg.Pool:
-    """Initialize the connection pool for the current event loop."""
+    """Инициализировать пул соединений для текущего event loop. Если пул уже существует, вернуть его."""
     loop = asyncio.get_running_loop()
     if id(loop) in _pools:
         return _pools[id(loop)]
@@ -26,7 +26,7 @@ async def init_pool() -> asyncpg.Pool:
 
 
 async def close_pool() -> None:
-    """Close all connection pools."""
+    """Закрывает пул соединения."""
     pools_to_close = list(_pools.values())
     _pools.clear()
 
@@ -34,18 +34,17 @@ async def close_pool() -> None:
         try:
             await asyncio.wait_for(pool.close(), timeout=5.0)
         except asyncio.TimeoutError:
-            # Force terminate if close times out
+            # Принудительно закрыть пул, если он не отвечает
             pool.terminate()
         except RuntimeError as e:
             if "Event loop is closed" in str(
                 e
             ) or "attached to a different loop" in str(e):
-                # Loop is already closed or task is attached to different loop, just terminate the pool
+                # Если событие loop уже закрыт или пул прикреплен к другому loop, попытаться принудительно закрыть
                 pool.terminate()
             else:
                 raise
         except Exception:
-            # For any other exception, try to terminate the pool
             try:
                 pool.terminate()
             except Exception:
@@ -53,7 +52,6 @@ async def close_pool() -> None:
 
 
 def get_pool() -> asyncpg.Pool:
-    """Get the connection pool associated with the current event loop."""
     loop = asyncio.get_running_loop()
     pool = _pools.get(id(loop))
     if pool is None:
@@ -65,7 +63,6 @@ def get_pool() -> asyncpg.Pool:
 
 @asynccontextmanager
 async def get_pg_connection() -> AsyncGenerator[asyncpg.Connection, None]:
-    """Get a connection from the pool."""
     loop = asyncio.get_running_loop()
     pool = _pools.get(id(loop))
     if pool is None:

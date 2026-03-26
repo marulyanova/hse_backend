@@ -29,12 +29,12 @@ class AuthService:
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash password using SHA256"""
+        """Хэширование пароля SHA256"""
         return hashlib.sha256(password.encode()).hexdigest()
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verify plain password against hashed password"""
+        """Верификация пароля путем сравнения хэшей"""
         return AuthService.hash_password(plain_password) == hashed_password
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
@@ -112,16 +112,16 @@ class AuthService:
         """
         from hse_backend.repositories.accounts import AccountRepository
 
-        # Find account by login
+        # найти аккаунт по логину
         account_data = await account_repo.get_account_by_login(login)
         if not account_data:
             return None
 
-        # Verify password
+        # проверить пароль
         if not self.verify_password(password, account_data["password"]):
             return None
 
-        # Check if account is blocked
+        # проверить, не заблокирован ли аккаунт
         if account_data.get("is_blocked"):
             return None
 

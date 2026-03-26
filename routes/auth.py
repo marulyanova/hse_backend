@@ -19,7 +19,6 @@ async def login(login_request: LoginRequest, response: Response):
     labels = {"status": "unknown"}
 
     try:
-        # Use AuthService to authenticate
         account = await auth_service.authenticate_user(
             account_repo, login_request.login, login_request.password
         )

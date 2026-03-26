@@ -3,19 +3,22 @@ import pytest
 from pathlib import Path
 import asyncio
 
-# when running pytest from projects folder, ensure we can import the hse_backend package
-# conftest is in hse_backend/tests, so parents[2] points to the repository root, where hse_backend folder is present
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Also add the hse_backend directory to sys.path
 HSE_BACKEND_DIR = PROJECT_ROOT / "hse_backend"
 if str(HSE_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(HSE_BACKEND_DIR))
 
 from hse_backend.clients.redis import redis_client
 from hse_backend.clients.postgres import close_pool
+from hse_backend.main import app
+from hse_backend.ml_models.model import load_model
+from pathlib import Path
+import os
+from fastapi.testclient import TestClient
+from hse_backend.main import app
 
 import pytest_asyncio
 
@@ -31,12 +34,10 @@ def event_loop():
     loop.close()
 
 
+# postres pool для интеграционных тестов - создается один раз на сессию и закрывается в конце
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def postgres_pool():
-    # Pool is now initialized lazily, so no need to pre-initialize
     yield
-    # Close all pools at the end of the session
-    from hse_backend.clients.postgres import close_pool
 
     await close_pool()
 
@@ -73,11 +74,6 @@ def invalid_payloads():
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_redis_connection():
-    """
-    CAUTION: session-scoped autouse fixture.
-    Only use for critical setup like database/service connections.
-    Individual tests should request specific fixtures if they need cleanup.
-    """
 
     async def _connect():
         await redis_client.connect()
@@ -99,7 +95,7 @@ import uuid
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_account_cache():
-    """Clear all account cache before each test"""
+    """Очистка Redis cache для аккаунтов перед каждым тестом, чтобы избежать влияния данных из других тестов"""
     try:
         await redis_client.delete_pattern("account:*")
     except Exception:
@@ -111,8 +107,6 @@ async def clear_account_cache():
 @pytest.fixture(scope="function")
 def authenticated_client(event_loop):
     """Фикстура для аутентифицированного клиента"""
-    from fastapi.testclient import TestClient
-    from hse_backend.main import app
 
     account_repo = AccountRepository()
 
@@ -135,7 +129,7 @@ def authenticated_client(event_loop):
     client, account_id = event_loop.run_until_complete(setup())
     yield client
 
-    # Clear Redis cache for this account after test
+    # очистка Redis cache для этого аккаунта после теста, чтобы не влиять на другие тесты
     async def cleanup():
         try:
             await redis_client.delete(f"account:{account_id}")
@@ -147,13 +141,6 @@ def authenticated_client(event_loop):
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_app_models():
-    """
-    Initialize app models for tests
-    """
-    from hse_backend.main import app
-    from hse_backend.ml_models.model import load_model
-    from pathlib import Path
-    import os
 
     BASE_DIR = Path(__file__).resolve().parents[1]
     model_dir = BASE_DIR / "ml_models"
@@ -162,11 +149,10 @@ def setup_app_models():
     if os.path.exists(violation_model_path):
         app.state.models = {"violation_model": load_model(violation_model_path)}
     else:
-        # For tests, create a dummy model if not exists
+        # для тестов можно просто создать и загрузить фиктивную модель, чтобы не зависеть от реальной модели
         from sklearn.ensemble import RandomForestClassifier
         import numpy as np
 
-        # Dummy model
         model = RandomForestClassifier(n_estimators=10, random_state=42)
         X = np.random.rand(100, 4)
         y = np.random.randint(0, 2, 100)
@@ -174,14 +160,10 @@ def setup_app_models():
         app.state.models = {"violation_model": model}
 
 
-@pytest.fixture()  # Removed autouse=True to prevent unwanted side effects
+@pytest.fixture()
 def clean_redis_cache():
     """
-    Fixture to clean Redis cache. Use explicitly in tests that need it:
-
-    @pytest.mark.asyncio
-    async def test_something(clean_redis_cache):
-        # cache is cleaned before this test
+    Фикстура для очистки Redis cache перед каждым тестом, чтобы избежать влияния данных из других тестов.
     """
 
     async def _clean():

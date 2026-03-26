@@ -9,6 +9,8 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+pytestmark = [pytest.mark.unit]
+
 
 @pytest.fixture
 def client():

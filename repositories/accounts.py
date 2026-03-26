@@ -17,7 +17,7 @@ class AccountRepository:
         if not password or not isinstance(password, str):
             raise ValueError("password must be a non-empty string")
 
-        # Hash password before storing
+        # хэшировать пароль перед сохранением
         hashed_password = AuthService.hash_password(password)
 
         query = """
@@ -39,7 +39,7 @@ class AccountRepository:
         if not isinstance(account_id, int) or account_id <= 0:
             raise ValueError("account_id must be a positive integer")
 
-        # Try to get from cache first
+        # пытаться получить из кэша Redis
         cache_key = f"account:{account_id}"
 
         try:
@@ -52,7 +52,6 @@ class AccountRepository:
                 )
         except Exception as e:
             print(f"Redis cache get error: {e}")
-            # Continue to DB if cache fails
 
         query = """
             SELECT id, login, password, is_blocked
@@ -70,12 +69,11 @@ class AccountRepository:
 
         account_dict = dict(row)
 
-        # Cache the result for 5 minutes (300 seconds)
+        # кэшировать результат в Redis на 5 минут
         try:
             await redis_client.set(cache_key, account_dict, ttl_seconds=300)
         except Exception as e:
             print(f"Redis cache set error: {e}")
-            # Don't fail if cache write fails
 
         return account_dict
 
@@ -114,7 +112,7 @@ class AccountRepository:
         DB_QUERY_DURATION.labels(query_type="delete", table="account").observe(duration)
 
         if row:
-            # Invalidate cache
+            # Инвалидировать кэш Redis при удалении аккаунта
             cache_key = f"account:{account_id}"
             try:
                 await redis_client.delete(cache_key)
@@ -140,7 +138,7 @@ class AccountRepository:
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="update", table="account").observe(duration)
 
-        # Invalidate cache
+        # инвалидировать кэш Redis при изменении статуса блокировки
         cache_key = f"account:{account_id}"
         try:
             await redis_client.delete(cache_key)
@@ -166,7 +164,7 @@ class AccountRepository:
         duration = time.time() - start
         DB_QUERY_DURATION.labels(query_type="update", table="account").observe(duration)
 
-        # Invalidate cache
+        # Инвалидировать кэш Redis при изменении статуса блокировки
         cache_key = f"account:{account_id}"
         try:
             await redis_client.delete(cache_key)

@@ -165,15 +165,7 @@ async def async_predict(
 @router.get("/moderation_result/{task_id}", response_model=ModerationResultResponse)
 async def get_moderation_result(task_id: int, current_account: CurrentAccount):
     """
-    Get moderation result by task_id.
-
-    Caching Strategy with Invalidation:
-    - When status='completed', the result is cached with item_id as key
-    - Cache TTL: 3600 seconds (configurable in PredictionCacheStorage)
-    - Cache Invalidation:
-      - Manual: When closing an ad via DELETE /close/{item_id}
-      - Automatic: TTL expiry
-      - Worker: Cache is set by worker when moderation completes
+    Получить результат модерации по task_id. Если результат уже есть, вернуть его. Если задача все еще в процессе, вернуть статус pending. Если задачи нет, вернуть 404.
     """
     if task_id <= 0:
         raise HTTPException(

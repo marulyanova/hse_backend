@@ -8,7 +8,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-pytestmark = [pytest.mark.integration_acc, pytest.mark.asyncio, pytest.mark.auth]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.integration_acc,
+    pytest.mark.asyncio,
+    pytest.mark.auth,
+]
 
 
 @pytest.fixture
@@ -71,7 +76,6 @@ async def test_login_blocked_account(client, account_repo):
     response = client.post("/login", json={"login": login, "password": "pass123"})
 
     assert response.status_code == 401
-    # Note: blocked accounts are rejected at AuthService level, same as invalid credentials
     assert "access_token" not in response.cookies
 
 

@@ -52,11 +52,9 @@ class RedisClient:
             try:
                 await self._pool.disconnect()
             except RuntimeError as e:
-                # Ignore event loop issues during shutdown
                 if "got Future" not in str(e) and "Event loop is closed" not in str(e):
                     raise
             except Exception:
-                # Ignore other exceptions during cleanup
                 pass
             self._pool = None
 
@@ -134,7 +132,7 @@ class RedisClient:
             return False
 
     async def delete_pattern(self, pattern: str) -> int:
-        """Delete all keys matching the pattern"""
+        """Удалить все ключи, соответствующие шаблону. Возвращает количество удаленных ключей."""
         if not self._connected:
             try:
                 await self.connect()
